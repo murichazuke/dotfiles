@@ -1,0 +1,101 @@
+- hosts: all
+  vars:
+    X_APT_CACHE_VALID_TIME: "{{ 60 * 60 * 24 }}"
+    X_OPENSSH_KEYPAIR_PATH: "{{ ansible_user_dir }}/.ssh/{{ ansible_user_id }}-{{ ansible_hostname }}"
+  tasks:
+    - fail:
+        msg: Do not run this playbook as root
+      when: ansible_user_id == "root"
+
+    - name: Setup apt repositories
+      block:
+        - name: apt-get install
+          apt:
+            name:
+              - ca-certificates
+              - apt-transport-https
+              - gnupg
+            state: latest
+            autoclean: yes
+            autoremove: yes
+            install_recommends: no
+            cache_valid_time: "{{ X_APT_CACHE_VALID_TIME }}"
+            update_cache: yes
+        # - apt_repository:
+      become: yes
+
+    - name: apt-cache update
+      apt:
+        install_recommends: no
+        cache_valid_time: "{{ X_APT_CACHE_VALID_TIME }}"
+        update_cache: yes
+      become: yes
+
+    - name: apt-get install
+      apt:
+        name:
+          - ca-certificates
+          - curl
+          - git
+          - vim
+          - apt-transport-https
+          - gnupg
+        state: latest
+        autoclean: yes
+        autoremove: yes
+        install_recommends: no
+        update_cache: no
+      become: yes
+
+    - name: apt-get upgrade
+      apt:
+        upgrade: full
+        autoclean: yes
+        autoremove: yes
+        install_recommends: no
+        update_cache: no
+      become: yes
+
+    - name: Install Poetry
+      shell:
+        cmd: curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python -
+        creates: "{{ ansible_user_dir }}/.poetry"
+
+    - name: Ensure Poetry upgrated
+      command:
+        argv:
+          - "{{ ansible_user_dir }}/.poetry/bin/poetry"
+          - self
+          - update
+
+    - community.crypto.openssh_keypair:
+        path: "{{ X_OPENSSH_KEYPAIR_PATH }}"
+        type: ed25519
+        comment: "{{ ansible_user_id }}@{{ ansible_hostname }}"
+      when: no
+
+    - blockinfile:
+        path: "{{ ansible_user_dir }}/.ssh/config"
+        mode: "0644"
+        create: yes
+        block: |
+          IdentityFile {{ X_OPENSSH_KEYPAIR_PATH }}
+          ServerAliveInterval 10
+
+    - blockinfile:
+        path: "{{ ansible_user_dir }}/.bashrc"
+        create: no
+        block: |
+          . {{ playbook_dir}}/.bashrc
+
+    - blockinfile:
+        path: "{{ ansible_user_dir }}/.vimrc"
+        create: yes
+        marker: '" {mark} ANSIBLE MANAGED BLOCK'
+        block: |
+          source {{ playbook_dir}}/.vimrc
+
+    - git:
+        repo: https://github.com/kristijanhusak/vim-packager
+        dest: "{{ ansible_user_dir }}/.vim/pack/packager/opt/vim-packager"
+
