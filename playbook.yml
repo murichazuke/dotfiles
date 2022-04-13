@@ -2,14 +2,18 @@
   vars:
     X_APT_CACHE_VALID_TIME: "{{ 60 * 60 * 24 }}"
     X_OPENSSH_KEYPAIR_PATH: "{{ ansible_user_dir }}/.ssh/{{ ansible_user_id }}-{{ ansible_hostname }}"
+    X_AWS_CLI_UPDATE: no
+    X_SOPS_VERSION: 3.7.2
+    X_GO_VERSION: 1.18.1
   tasks:
-    - fail:
-        msg: Do not run this playbook as root
-      when: ansible_user_id == "root"
+    - assert:
+        that:
+          ansible_user_id != "root"
+        fail_msg: Do not run this playbook as root
 
     - name: Setup apt repositories
       block:
-        - name: apt-get install
+        - name: Install prerequisites
           apt:
             name:
               - ca-certificates
@@ -21,52 +25,117 @@
             install_recommends: no
             cache_valid_time: "{{ X_APT_CACHE_VALID_TIME }}"
             update_cache: yes
-        # - apt_repository:
+
+        - apt_key:
+            url: "{{ item }}"
+          with_items:
+            - https://apt.releases.hashicorp.com/gpg
+
+        - apt_repository:
+            repo: "{{ item }}"
+          with_items:
+            - "deb [arch=amd64] https://apt.releases.hashicorp.com {{ ansible_lsb.codename }} main"
       become: yes
 
-    - name: apt-cache update
-      apt:
-        install_recommends: no
-        cache_valid_time: "{{ X_APT_CACHE_VALID_TIME }}"
-        update_cache: yes
+    - name: Install APT packages
+      block:
+        - name: apt-cache update
+          apt:
+            install_recommends: no
+            cache_valid_time: "{{ X_APT_CACHE_VALID_TIME }}"
+            update_cache: yes
+
+        - name: apt-get install
+          apt:
+            name:
+              - bash-completion
+              - bind9-dnsutils
+              - curl
+              - ffmpeg
+              - ghostscript
+              - git
+              - imagemagick
+              - jsonnet
+              - man
+              - ncdu
+              - terraform
+              - python3-venv
+              - tree
+              - unzip
+              - vim
+              - zip
+            state: latest
+            autoclean: yes
+            autoremove: yes
+            install_recommends: no
+            update_cache: no
+
+        - name: apt-get upgrade
+          apt:
+            upgrade: full
+            autoclean: yes
+            autoremove: yes
+            install_recommends: no
+            update_cache: no
+
+        - name: Install deb packages
+          apt:
+            deb: "{{ item }}"
+          with_items:
+            - "https://github.com/mozilla/sops/releases/download/v{{ X_SOPS_VERSION }}/sops_{{ X_SOPS_VERSION }}_amd64.deb"
       become: yes
 
-    - name: apt-get install
-      apt:
-        name:
-          - ca-certificates
-          - curl
-          - git
-          - vim
-          - apt-transport-https
-          - gnupg
-        state: latest
-        autoclean: yes
-        autoremove: yes
-        install_recommends: no
-        update_cache: no
+    - name: Install AWS CLI v2
+      block:
+        - name: Download and extract AWS CLI v2
+          unarchive:  # this creates /usr/local/src/aws
+            src: https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
+            dest: /usr/local/src
+            remote_src: yes
+
+        - name: Install AWS CLI v2
+          command:
+            cmd: /usr/local/src/aws/install --install-dir /opt/aws-cli
+            creates: /usr/local/bin/aws
+
+        - name: Update AWS CLI v2
+          command:
+            cmd: /usr/local/src/aws/install --install-dir /opt/aws-cli
+          when: X_AWS_CLI_UPDATE
       become: yes
 
-    - name: apt-get upgrade
-      apt:
-        upgrade: full
-        autoclean: yes
-        autoremove: yes
-        install_recommends: no
-        update_cache: no
+    - name: Install Golang
+      block:
+        - name: Make a directory to which golang is to be extracted
+          file:
+            state: directory
+            mode: '0755'
+            path: "{{ x_go_dir }}"
+
+        - name: Download and extract Golang
+          unarchive:  # this creates /usr/local/src/aws
+            src: "https://go.dev/dl/go{{ X_GO_VERSION }}.linux-amd64.tar.gz"
+            dest: "{{ x_go_dir }}"
+            remote_src: yes
+            extra_opts: --strip-components=1
+
+      vars:
+        x_go_dir: "/opt/go-{{ X_GO_VERSION }}"
       become: yes
 
     - name: Install Poetry
-      shell:
-        cmd: curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python -
-        creates: "{{ ansible_user_dir }}/.poetry"
+      block:
+        - name: Install Poetry
+          shell:
+            cmd: curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python3 -
+            creates: "{{ ansible_user_dir }}/.poetry"
 
-    - name: Ensure Poetry upgrated
-      command:
-        argv:
-          - "{{ ansible_user_dir }}/.poetry/bin/poetry"
-          - self
-          - update
+        - name: Ensure Poetry up-to-date
+          command:
+            argv:
+              - "{{ ansible_user_dir }}/.poetry/bin/poetry"
+              - self
+              - update
 
     - community.crypto.openssh_keypair:
         path: "{{ X_OPENSSH_KEYPAIR_PATH }}"
