@@ -3,8 +3,10 @@
     X_APT_CACHE_VALID_TIME: "{{ 60 * 60 * 24 }}"
     X_OPENSSH_KEYPAIR_PATH: "{{ ansible_user_dir }}/.ssh/{{ ansible_user_id }}-{{ ansible_hostname }}"
     X_AWS_CLI_UPDATE: no
+    X_AWS_SAM_CLI_UPDATE: no
     X_SOPS_VERSION: 3.7.2
     X_GO_VERSION: 1.18.1
+    X_GH_VERSION: 2.10.1
   tasks:
     - assert:
         that:
@@ -26,15 +28,29 @@
             cache_valid_time: "{{ X_APT_CACHE_VALID_TIME }}"
             update_cache: yes
 
+        - name: Add a package sigining key
+          shell:
+            cmd: "curl -fsSL {{ item.src }} | gpg --dearmor | sudo tee '{{ item.dest }}' >/dev/null"
+            creates: "{{ item.dest }}"
+          with_items:
+            - src: https://deb.nodesource.com/gpgkey/nodesource.gpg.key
+              dest: /usr/share/keyrings/nodesource.gpg
+
         - apt_key:
             url: "{{ item }}"
           with_items:
             - https://apt.releases.hashicorp.com/gpg
+            - https://pkg.wslutiliti.es/public.key
+            - https://aquasecurity.github.io/trivy-repo/deb/public.key
 
         - apt_repository:
             repo: "{{ item }}"
           with_items:
             - "deb [arch=amd64] https://apt.releases.hashicorp.com {{ ansible_lsb.codename }} main"
+            - "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_16.x {{ ansible_lsb.codename }} main"
+            - "deb-src [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_16.x {{ ansible_lsb.codename }} main"
+            - "deb https://pkg.wslutiliti.es/debian {{ ansible_lsb.codename }} main"
+            - "deb https://aquasecurity.github.io/trivy-repo/deb {{ ansible_lsb.codename }} main"
       become: yes
 
     - name: Install APT packages
@@ -50,19 +66,34 @@
             name:
               - bash-completion
               - bind9-dnsutils
+              - build-essential
+              - bundler
               - curl
+              - dwdiff
               - ffmpeg
               - ghostscript
               - git
+              - gpg-agent
               - imagemagick
+              - info
               - jsonnet
+              - jq
+              - keychain
+              - libmariadb-dev
               - man
               - ncdu
+              - nodejs
               - terraform
               - python3-venv
+              - python3-dev
+              - redis-tools
+              - ruby
+              - ruby-dev
               - tree
+              - trivy
               - unzip
               - vim
+              - wslu
               - zip
             state: latest
             autoclean: yes
@@ -83,6 +114,9 @@
             deb: "{{ item }}"
           with_items:
             - "https://github.com/mozilla/sops/releases/download/v{{ X_SOPS_VERSION }}/sops_{{ X_SOPS_VERSION }}_amd64.deb"
+            - "https://github.com/cli/cli/releases/download/v{{ X_GH_VERSION }}/gh_{{ X_GH_VERSION }}_linux_amd64.deb"
+            # https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-exec.html#ecs-exec-prerequisites
+            - "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb"
       become: yes
 
     - name: Install AWS CLI v2
@@ -102,6 +136,31 @@
           command:
             cmd: /usr/local/src/aws/install --install-dir /opt/aws-cli
           when: X_AWS_CLI_UPDATE
+      become: yes
+
+    - name: Install SAM CLI
+      block:
+        - name: Make a directory to which SAM CLI is to be extracted
+          file:
+            state: directory
+            mode: '0755'
+            path: /usr/local/src/aws-sam-cli
+
+        - name: Download and extract AWS SAM CLI
+          unarchive:
+            src: https://github.com/aws/aws-sam-cli/releases/latest/download/aws-sam-cli-linux-x86_64.zip
+            dest: /usr/local/src/aws-sam-cli
+            remote_src: yes
+
+        - name: Install AWS SAM CLI
+          command:
+            cmd: /usr/local/src/aws-sam-cli --install-dir /opt/aws-sam-cli
+            creates: /usr/local/bin/sam
+
+        - name: Update AWS SAM CLI
+          command:
+            cmd: /usr/local/src/aws/install --install-dir /opt/aws-cli --update
+          when: X_AWS_SAM_CLI_UPDATE
       become: yes
 
     - name: Install Golang
@@ -148,7 +207,6 @@
         mode: "0644"
         create: yes
         block: |
-          IdentityFile {{ X_OPENSSH_KEYPAIR_PATH }}
           ServerAliveInterval 10
 
     - blockinfile:

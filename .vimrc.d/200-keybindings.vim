@@ -9,9 +9,12 @@ nnoremap <C-H> :tabp <CR>
 " Clear hlsearch
 nmap <ESC><ESC> :nohlsearch<CR>:set nopaste<CR><ESC>
 
+" Lsp
+nmap <LEADER>d :LspDefinition <CR>
+
 " cf. https://stackoverflow.com/a/4257175
 nnoremap * *``
 nnoremap # #``
 
 " Open a buffers list in the QuickFix window
-cabbrev ls ListBuffers
+" cabbrev ls ListBuffers

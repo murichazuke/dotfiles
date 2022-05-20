@@ -1,8 +1,8 @@
 set -o vi
 
 # for setting history length see HISTSIZE and HISTFILESIZE in bash(1)
-HISTSIZE=9999999
-HISTFILESIZE=9999999
+HISTSIZE=999999
+HISTFILESIZE=999999
 
 # aliases: enable color support of ls and also add handy aliases
 alias grep='grep --color=auto'
@@ -25,3 +25,10 @@ export PATH="${PATH}:~/.local/bin"
 export PATH="${PATH}:~/.poetry/bin"
 export GPG_TTY=$(tty)
 export EDITOR=vim
+
+# keychain
+eval $(keychain --agents ssh,gpg --eval)
+
+# completion
+complete -C '/usr/local/bin/aws_completer' aws
+eval "$(gh completion -s bash)"

@@ -6,6 +6,7 @@ function! s:packager_init(packager) abort
   call a:packager.add("prabirshrestha/asyncomplete.vim")
   call a:packager.add("prabirshrestha/asyncomplete-lsp.vim")
   call a:packager.add("dense-analysis/ale")
+  call a:packager.add("google/vim-jsonnet")
 endfunction
 
 " see: https://github.com/hashivim/vim-terraform/issues/82
@@ -36,3 +37,20 @@ let g:ale_list_window_size = 3
 " ================
 let g:lsp_settings_filetype_tf = 'terraform-lsp'
 
+let g:lsp_log_verbose = 1
+let g:lsp_log_file = expand('~/vim-lsp.log')
+
+let g:lsp_settings = {
+\   'pylsp-all': {
+\       'workspace_config': {
+\           'pylsp': {
+\               'configurationSources': ['flake8'],
+\               'plugins': {
+\                   'flake8': {
+\                       'exclude': ['venv/']
+\                   }
+\               }
+\           },
+\       },
+\   },
+\}
