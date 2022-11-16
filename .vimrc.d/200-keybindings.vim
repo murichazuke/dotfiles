@@ -11,6 +11,7 @@ nmap <ESC><ESC> :nohlsearch<CR>:set nopaste<CR><ESC>
 
 " Lsp
 nmap <LEADER>d :LspDefinition <CR>
+nmap <F2> :LspRename <CR>
 
 " cf. https://stackoverflow.com/a/4257175
 nnoremap * *``

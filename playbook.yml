@@ -6,7 +6,22 @@
     X_AWS_SAM_CLI_UPDATE: no
     X_SOPS_VERSION: 3.7.2
     X_GO_VERSION: 1.18.1
-    X_GH_VERSION: 2.10.1
+    X_GH_VERSION: 2.17.0
+    X_JP_VERSION: 0.2.1
+    X_BUILDG_VERSION: 0.4.1
+    X_DEADSNAKES_CODENAME_MAPPING:
+      # see: https://askubuntu.com/a/445496
+      bullseye: jammy
+      bookworm: jammy
+    X_PPA_CODENAME_MAPPING:
+      # see: https://askubuntu.com/a/445496
+      squeeze: lucid
+      wheezy: precise
+      jessie: trusty
+      stretch: xenial
+      buster: bionic
+      bullseye: focal
+      bookworm: jammy
   tasks:
     - assert:
         that:
@@ -21,6 +36,7 @@
               - ca-certificates
               - apt-transport-https
               - gnupg
+              - software-properties-common
             state: latest
             autoclean: yes
             autoremove: yes
@@ -42,6 +58,7 @@
             - https://apt.releases.hashicorp.com/gpg
             - https://pkg.wslutiliti.es/public.key
             - https://aquasecurity.github.io/trivy-repo/deb/public.key
+            - https://packages.adoptium.net/artifactory/api/gpg/key/public
 
         - apt_repository:
             repo: "{{ item }}"
@@ -51,6 +68,19 @@
             - "deb-src [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_16.x {{ ansible_lsb.codename }} main"
             - "deb https://pkg.wslutiliti.es/debian {{ ansible_lsb.codename }} main"
             - "deb https://aquasecurity.github.io/trivy-repo/deb {{ ansible_lsb.codename }} main"
+            - "deb https://packages.adoptium.net/artifactory/deb {{ ansible_lsb.codename }} main"
+
+        - apt_repository:
+            repo: "ppa:deadsnakes/ppa"
+            codename: "{{ X_DEADSNAKES_CODENAME_MAPPING[ansible_lsb.codename] }}"
+            state: absent
+
+        - apt_repository:
+            repo: "{{ item }}"
+            codename: "{{ X_PPA_CODENAME_MAPPING[ansible_lsb.codename] }}"
+          with_items: []
+      tags:
+        - setup-apt-repositories
       become: yes
 
     - name: Install APT packages
@@ -68,7 +98,9 @@
               - bind9-dnsutils
               - build-essential
               - bundler
+              - byobu
               - curl
+              - default-mysql-client
               - dwdiff
               - ffmpeg
               - ghostscript
@@ -76,19 +108,22 @@
               - gpg-agent
               - imagemagick
               - info
-              - jsonnet
               - jq
+              - jsonnet
               - keychain
+              - ldap-utils
               - libmariadb-dev
               - man
               - ncdu
               - nodejs
-              - terraform
-              - python3-venv
               - python3-dev
+              - python3-venv
               - redis-tools
               - ruby
               - ruby-dev
+              - telnet
+              - temurin-8-jdk
+              - terraform
               - tree
               - trivy
               - unzip
@@ -100,6 +135,8 @@
             autoremove: yes
             install_recommends: no
             update_cache: no
+          tags:
+            - apt-get-install
 
         - name: apt-get upgrade
           apt:
@@ -154,14 +191,39 @@
 
         - name: Install AWS SAM CLI
           command:
-            cmd: /usr/local/src/aws-sam-cli --install-dir /opt/aws-sam-cli
+            cmd: /usr/local/src/aws-sam-cli/install --install-dir /opt/aws-sam-cli
             creates: /usr/local/bin/sam
 
         - name: Update AWS SAM CLI
           command:
-            cmd: /usr/local/src/aws/install --install-dir /opt/aws-cli --update
+            cmd: /usr/local/src/aws-sam-cli/install --install-dir /opt/aws-sam-cli
           when: X_AWS_SAM_CLI_UPDATE
       become: yes
+
+    - name: Install act
+      block:
+        - name: Make a directory to extract an archive
+          file:
+            state: directory
+            mode: '0755'
+            path: /opt/act
+
+        - name: Download and extract the archive
+          unarchive:
+            src: https://github.com/nektos/act/releases/download/v0.2.26/act_Linux_x86_64.tar.gz
+            dest: /opt/act
+            owner: root
+            group: root
+            remote_src: yes
+
+        - name: Link the executable
+          file:
+            src: /opt/act/act
+            dest: /usr/local/bin/act
+            state: link
+
+      become: yes
+      tags: test
 
     - name: Install Golang
       block:
@@ -172,14 +234,38 @@
             path: "{{ x_go_dir }}"
 
         - name: Download and extract Golang
-          unarchive:  # this creates /usr/local/src/aws
+          unarchive:
             src: "https://go.dev/dl/go{{ X_GO_VERSION }}.linux-amd64.tar.gz"
             dest: "{{ x_go_dir }}"
             remote_src: yes
             extra_opts: --strip-components=1
-
       vars:
         x_go_dir: "/opt/go-{{ X_GO_VERSION }}"
+      become: yes
+
+    - name: Install Buildg
+      block:
+        - name: Make a directory to which Buildg is to be extracted
+          file:
+            state: directory
+            mode: '0755'
+            path: "{{ x_install_dir }}"
+
+        - name: Download and extract the archive
+          unarchive:
+            src: "https://github.com/ktock/buildg/releases/download/v{{ X_BUILDG_VERSION }}/buildg-full-v{{ X_BUILDG_VERSION }}-linux-amd64.tar.gz"
+            dest: "{{ x_install_dir }}"
+            remote_src: yes
+            extra_opts: --strip-components=1
+        - name: Create a symlink
+          file:
+            state: link
+            src: "{{ x_install_dir }}"
+            dest: "{{ x_path_dir }}"
+      vars:
+        x_install_dir: "/opt/buildg-{{ X_BUILDG_VERSION }}"
+        x_path_dir: "/opt/buildg"
+      tags: install-buildg
       become: yes
 
     - name: Install Poetry
@@ -195,6 +281,46 @@
               - "{{ ansible_user_dir }}/.poetry/bin/poetry"
               - self
               - update
+
+    - name: Install Embulk
+      block:
+        - name: Make an installation diretory
+          file:
+            state: directory
+            mode: '0755'
+            path: "/opt/embulk"
+
+        - name: Download and extract Golang
+          get_url:
+            url: "https://dl.embulk.org/embulk-latest.jar"
+            dest: "/opt/embulk/embulk"
+            group: root
+            owner: root
+            mode: '0755'
+
+      tags:
+        - install-embulk
+      become: yes
+
+    - name: Install jp
+      block:
+        - name: Make an installation diretory
+          file:
+            state: directory
+            mode: '0755'
+            path: "/opt/jp"
+
+        - name: Download and extract Golang
+          get_url:
+            url: "https://github.com/jmespath/jp/releases/download/{{ X_JP_VERSION }}/jp-linux-amd64"
+            dest: "/opt/jp/jp"
+            group: root
+            owner: root
+            mode: '0755'
+
+      tags:
+        - install-jp
+      become: yes
 
     - community.crypto.openssh_keypair:
         path: "{{ X_OPENSSH_KEYPAIR_PATH }}"
