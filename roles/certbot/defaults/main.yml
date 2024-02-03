@@ -1,0 +1,17 @@
+---
+x_certbot_install_dir: /opt/certbot
+x_certbot_package: certbot
+x_certbot_extra_packages: []
+x_certbot_extra_confs: []
+  # example:
+  # - dest: /etc/letsencrypt/gandi/gandi.ini
+  #   owner: root
+  #   group: root
+  #   mode: '0600'
+  #   content: dns_gandi_token=****
+  #   ignore_changes: true
+x_certbot_conf_dir: /etc/letsencrypt
+x_certbot_extra_args: ''
+x_certbot_email: ''
+x_certbot_domain: ''
+x_certbot_restart_services: []

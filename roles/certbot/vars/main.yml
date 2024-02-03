@@ -1,0 +1,3 @@
+---
+x_certbot_virtualenv_dir: "{{ x_certbot_install_dir }}/venv"
+x_certbot_cert_name: "{{ x_certbot_domain|replace('*.', '') }}"

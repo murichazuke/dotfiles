@@ -1,34 +1,56 @@
 - hosts: all
   vars:
+    X_IS_WSL: "{{ 'wsl' in lookup('file', '/proc/sys/kernel/osrelease').lower() }}"
     X_APT_CACHE_VALID_TIME: "{{ 60 * 60 * 24 }}"
     X_OPENSSH_KEYPAIR_PATH: "{{ ansible_user_dir }}/.ssh/{{ ansible_user_id }}-{{ ansible_hostname }}"
     X_AWS_CLI_UPDATE: no
     X_AWS_SAM_CLI_UPDATE: no
+    X_ACT_VERSION: 0.2.57
     X_SOPS_VERSION: 3.7.2
-    X_GO_VERSION: 1.18.1
+    X_GO_VERSION: 1.21.6
     X_GH_VERSION: 2.17.0
     X_JP_VERSION: 0.2.1
+    X_NODEJS_VERSION: 20.11.0
     X_BUILDG_VERSION: 0.4.1
-    X_DEADSNAKES_CODENAME_MAPPING:
-      # see: https://askubuntu.com/a/445496
-      bullseye: jammy
-      bookworm: jammy
-    X_PPA_CODENAME_MAPPING:
-      # see: https://askubuntu.com/a/445496
-      squeeze: lucid
-      wheezy: precise
-      jessie: trusty
-      stretch: xenial
-      buster: bionic
-      bullseye: focal
-      bookworm: jammy
+    X_TERRAFORM_VERSION: 1.7.1
+    X_ISA_MAP:
+      AMD_ARM:
+        x86_64: amd64
+        aarch64: arm64
+      AMD_AARCH:
+        x86_64: amd64
+        aarch64: aarch64
+      X86_ARM:
+        x86_64: x86_64
+        aarch64: arm64
+      X86_AARCH:
+        x86_64: x86_64
+        aarch64: aarch64
+      X64_ARM:
+        x86_64: x64
+        aarch64: arm64
+      X64_AARCH:
+        x86_64: x64
+        aarch64: aarch64
+      SSM:
+        x86_64: 64bit
+        aarch64: arm64
+    X_ISA:
+      AMD_ARM: "{{ X_ISA_MAP.AMD_ARM[ansible_architecture] }}"
+      AMD_AARCH: "{{ X_ISA_MAP.AMD_AARCH[ansible_architecture] }}"
+      X86_ARM: "{{ X_ISA_MAP.X86_ARM[ansible_architecture] }}"
+      X86_AARCH: "{{ X_ISA_MAP.X86_AARCH[ansible_architecture] }}"
+      X64_ARM: "{{ X_ISA_MAP.X64_ARM[ansible_architecture] }}"
+      X64_AARCH: "{{ X_ISA_MAP.X64_AARCH[ansible_architecture] }}"
+      SSM: "{{ X_ISA_MAP.SSM[ansible_architecture] }}"
   tasks:
     - assert:
         that:
           ansible_user_id != "root"
         fail_msg: Do not run this playbook as root
 
-    - name: Setup apt repositories
+    - name: System configuration
+      become: true
       block:
         - name: Install prerequisites
           apt:
@@ -38,60 +60,56 @@
               - gnupg
               - software-properties-common
             state: latest
-            autoclean: yes
-            autoremove: yes
+            autoclean: true
+            autoremove: true
             install_recommends: no
             cache_valid_time: "{{ X_APT_CACHE_VALID_TIME }}"
-            update_cache: yes
+            update_cache: true
 
-        - name: Add a package sigining key
-          shell:
-            cmd: "curl -fsSL {{ item.src }} | gpg --dearmor | sudo tee '{{ item.dest }}' >/dev/null"
-            creates: "{{ item.dest }}"
+        - name: mkdir /etc/apt/keyrings
+          tags: setup-apt-repositories
+          file:
+             state: directory
+             mode: '0755'
+             path: /etc/apt/keyrings
+
+        - name: Install package sigining keys
+          tags: setup-apt-repositories
+          get_url:
+            url: "{{ item.url }}"
+            dest: "{{ item.dest }}"
+            mode: "0644"
           with_items:
-            - src: https://deb.nodesource.com/gpgkey/nodesource.gpg.key
-              dest: /usr/share/keyrings/nodesource.gpg
+            - url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
+              dest: /etc/apt/keyrings/nodesource-repo.asc
+            - url: https://pkg.wslutiliti.es/public.key
+              dest: /etc/apt/keyrings/wslu.asc
+            - url: https://aquasecurity.github.io/trivy-repo/deb/public.key
+              dest: /etc/apt/keyrings/trivy.asc
+            - url: https://packages.adoptium.net/artifactory/api/gpg/key/public
+              dest: /etc/apt/keyrings/adoptium.asc
+            - url: https://cli.github.com/packages/githubcli-archive-keyring.gpg
+              dest: /etc/apt/keyrings/githubcli.gpg
 
-        - apt_key:
-            url: "{{ item }}"
-          with_items:
-            - https://apt.releases.hashicorp.com/gpg
-            - https://pkg.wslutiliti.es/public.key
-            - https://aquasecurity.github.io/trivy-repo/deb/public.key
-            - https://packages.adoptium.net/artifactory/api/gpg/key/public
-
-        - apt_repository:
+        - name: Add APT repositories
+          apt_repository:
             repo: "{{ item }}"
+          tags: setup-apt-repositories
           with_items:
-            - "deb [arch=amd64] https://apt.releases.hashicorp.com {{ ansible_lsb.codename }} main"
-            - "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_16.x {{ ansible_lsb.codename }} main"
-            - "deb-src [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_16.x {{ ansible_lsb.codename }} main"
-            - "deb https://pkg.wslutiliti.es/debian {{ ansible_lsb.codename }} main"
-            - "deb https://aquasecurity.github.io/trivy-repo/deb {{ ansible_lsb.codename }} main"
-            - "deb https://packages.adoptium.net/artifactory/deb {{ ansible_lsb.codename }} main"
+            - "deb [signed-by=/etc/apt/keyrings/nodesource-repo.asc] https://deb.nodesource.com/node_18.x nodistro main"
+            - "deb [signed-by=/etc/apt/keyrings/wslu.asc] https://pkg.wslutiliti.es/debian {{ ansible_lsb.codename }} main"
+            - "deb [signed-by=/etc/apt/keyrings/trivy.asc] https://aquasecurity.github.io/trivy-repo/deb {{ ansible_lsb.codename }} main"
+            - "deb [signed-by=/etc/apt/keyrings/adoptium.asc] https://packages.adoptium.net/artifactory/deb {{ ansible_lsb.codename }} main"
+            - "deb [arch={{ X_ISA.AMD_ARM }} signed-by=/etc/apt/keyrings/githubcli.gpg] https://cli.github.com/packages stable main"
 
-        - apt_repository:
-            repo: "ppa:deadsnakes/ppa"
-            codename: "{{ X_DEADSNAKES_CODENAME_MAPPING[ansible_lsb.codename] }}"
-            state: absent
-
-        - apt_repository:
-            repo: "{{ item }}"
-            codename: "{{ X_PPA_CODENAME_MAPPING[ansible_lsb.codename] }}"
-          with_items: []
-      tags:
-        - setup-apt-repositories
-      become: yes
-
-    - name: Install APT packages
-      block:
         - name: apt-cache update
           apt:
             install_recommends: no
             cache_valid_time: "{{ X_APT_CACHE_VALID_TIME }}"
-            update_cache: yes
+            update_cache: true
 
         - name: apt-get install
+          tags: apt-get-install
           apt:
             name:
               - bash-completion
@@ -101,8 +119,10 @@
               - byobu
               - curl
               - default-mysql-client
+              - default-libmysqlclient-dev
               - dwdiff
               - ffmpeg
+              - gh
               - ghostscript
               - git
               - gpg-agent
@@ -115,15 +135,21 @@
               - libmariadb-dev
               - man
               - ncdu
-              - nodejs
+              # - nodejs
+              # - npm
+              - pdftk
+              - pkg-config
+              - python3-bcrypt
+              - python3-cryptography
               - python3-dev
               - python3-venv
+              - ripgrep
               - redis-tools
               - ruby
               - ruby-dev
+              - sqlite3
               - telnet
               - temurin-8-jdk
-              - terraform
               - tree
               - trivy
               - unzip
@@ -131,224 +157,169 @@
               - wslu
               - zip
             state: latest
-            autoclean: yes
-            autoremove: yes
+            autoclean: true
+            autoremove: true
             install_recommends: no
             update_cache: no
-          tags:
-            - apt-get-install
 
         - name: apt-get upgrade
+          tags: apt-get-upgrade
           apt:
             upgrade: full
-            autoclean: yes
-            autoremove: yes
+            autoclean: true
+            autoremove: true
             install_recommends: no
             update_cache: no
 
-        - name: Install deb packages
+        - name: dpkg -i
+          tags: dpkg-i
           apt:
             deb: "{{ item }}"
           with_items:
-            - "https://github.com/mozilla/sops/releases/download/v{{ X_SOPS_VERSION }}/sops_{{ X_SOPS_VERSION }}_amd64.deb"
-            - "https://github.com/cli/cli/releases/download/v{{ X_GH_VERSION }}/gh_{{ X_GH_VERSION }}_linux_amd64.deb"
+            - "https://github.com/mozilla/sops/releases/download/v{{ X_SOPS_VERSION }}/sops_{{ X_SOPS_VERSION }}_{{ X_ISA.AMD_ARM }}.deb"
             # https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-exec.html#ecs-exec-prerequisites
-            - "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb"
-      become: yes
+            - "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_{{ X_ISA.SSM }}/session-manager-plugin.deb"
 
-    - name: Install AWS CLI v2
+        - name: Install binary distribution packages
+          tags: install-bins
+          include_role:
+            name: "install"
+          loop_control:
+            loop_var: x_install
+          with_items:
+            - name: AWS CLI
+              src: "https://awscli.amazonaws.com/awscli-exe-linux-{{ X_ISA.X86_AARCH }}.zip"
+              archive_dest: /usr/local/src
+              versioned_dest: /opt/awscli-installer
+              dest: /opt/awscli-installer
+              post_script_creates: /usr/local/bin/aws
+              post_script: /opt/awscli-installer/aws/install --install-dir /opt/awscli
+            - name: AWS SAM CLI
+              src: "https://github.com/aws/aws-sam-cli/releases/latest/download/aws-sam-cli-linux-{{ X_ISA.X86_ARM }}.zip"
+              archive_dest: /usr/local/src
+              versioned_dest: /opt/aws-sam-cli-installer
+              dest: /opt/aws-sam-cli-installer
+              post_script_creates: /usr/local/bin/sam
+              post_script: /opt/aws-sam-cli-installer/install --install-dir /opt/aws-sam-cli
+            - name: act
+              src: "https://github.com/nektos/act/releases/download/v{{ X_ACT_VERSION }}/act_Linux_{{ X_ISA.X86_ARM }}.tar.gz"
+              archive_dest: /usr/local/src
+              versioned_dest: "/opt/act-{{ X_ACT_VERSION }}"
+              dest: /opt/act
+            - name: Golang
+              src: "https://go.dev/dl/go{{ X_GO_VERSION }}.linux-{{ X_ISA.AMD_ARM }}.tar.gz"
+              archive_dest: /usr/local/src
+              versioned_dest: "/opt/go-{{ X_GO_VERSION }}"
+              strip_components: true
+              dest: /opt/go
+            - name: Buildg
+              src: "https://github.com/ktock/buildg/releases/download/v{{ X_BUILDG_VERSION }}/buildg-full-v{{ X_BUILDG_VERSION }}-linux-{{ X_ISA.AMD_ARM }}.tar.gz"
+              archive_dest: /usr/local/src
+              versioned_dest: "/opt/buildg-{{ X_BUILDG_VERSION }}"
+              strip_components: true
+              dest: /opt/buildg
+            - name: Embulk
+              src: https://dl.embulk.org/embulk-latest.jar
+              versioned_dest: /opt/bin/embulk
+              dest: /opt/bin/embulk
+            - name: jp
+              src: "https://github.com/jmespath/jp/releases/download/{{ X_JP_VERSION }}/jp-linux-{{ X_ISA.AMD_ARM }}"
+              versioned_dest: "/opt/bin/jp-{{ X_JP_VERSION }}"
+              dest: /opt/bin/jp
+            - name: Terraform
+              src: "https://releases.hashicorp.com/terraform/{{ X_TERRAFORM_VERSION }}/terraform_{{ X_TERRAFORM_VERSION }}_linux_{{ X_ISA.AMD_ARM }}.zip"
+              archive_dest: /usr/local/src
+              versioned_dest: "/opt/bin/terraform-{{ X_TERRAFORM_VERSION }}"
+              dest: /opt/bin/terraform
+            - name: Node.js
+              src: "https://nodejs.org/dist/v{{ X_NODEJS_VERSION }}/node-v{{ X_NODEJS_VERSION }}-linux-{{ X_ISA.X64_ARM }}.tar.xz"
+              archive_dest: /usr/local/src
+              versioned_dest: "/opt/nodejs-{{ X_NODEJS_VERSION }}"
+              strip_components: true
+              dest: /opt/bin/nodejs
+
+        - name: Setup certbot
+          tags: setup-certbot
+          import_role:
+            name: "certbot"
+          vars:
+            x_certbot_extra_packages:
+              - certbot-plugin-gandi
+            x_certbot_extra_confs:
+              - dest: /etc/letsencrypt/gandi/gandi.ini
+                owner: root
+                group: root
+                mode: '0600'
+                content: "dns_gandi_token={{ X_GANDI_PAT }}"
+                # ignore_changes: true
+            x_certbot_extra_args: >-
+              --authenticator=dns-gandi
+              --dns-gandi-credentials=/etc/letsencrypt/gandi/gandi.ini
+            x_certbot_restart_services:
+              - nginx
+            x_certbot_domain: "*.{{ X_DOMAIN }}"
+            x_certbot_email: "{{ X_CERTBOT_EMAIL }}"
+
+    - name: User configuration
+      become: false
       block:
-        - name: Download and extract AWS CLI v2
-          unarchive:  # this creates /usr/local/src/aws
-            src: https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
-            dest: /usr/local/src
-            remote_src: yes
+        - name: Generate an SSH keypair
+          tags: generate-ssh-keypair
+          import_role:
+            name: "openssh_keypair"
+          vars:
+            x_openssh_keypair_path: "{{ X_OPENSSH_KEYPAIR_PATH }}"
 
-        - name: Install AWS CLI v2
-          command:
-            cmd: /usr/local/src/aws/install --install-dir /opt/aws-cli
-            creates: /usr/local/bin/aws
+        - name: ssh_config
+          blockinfile:
+            path: "{{ ansible_user_dir }}/.ssh/config"
+            mode: "0644"
+            create: true
+            block: |
+              ServerAliveInterval 10
 
-        - name: Update AWS CLI v2
-          command:
-            cmd: /usr/local/src/aws/install --install-dir /opt/aws-cli
-          when: X_AWS_CLI_UPDATE
-      become: yes
+        - name: bashrc
+          blockinfile:
+            path: "{{ ansible_user_dir }}/.bashrc"
+            create: no
+            block: |
+              . {{ playbook_dir}}/.bashrc
 
-    - name: Install SAM CLI
-      block:
-        - name: Make a directory to which SAM CLI is to be extracted
-          file:
-            state: directory
-            mode: '0755'
-            path: /usr/local/src/aws-sam-cli
+        - name: vimrc
+          blockinfile:
+            path: "{{ ansible_user_dir }}/.vimrc"
+            create: true
+            marker: '" {mark} ANSIBLE MANAGED BLOCK'
+            block: |
+              source {{ playbook_dir}}/.vimrc
 
-        - name: Download and extract AWS SAM CLI
-          unarchive:
-            src: https://github.com/aws/aws-sam-cli/releases/latest/download/aws-sam-cli-linux-x86_64.zip
-            dest: /usr/local/src/aws-sam-cli
-            remote_src: yes
+        - name: gitconfig
+          tags: gitconfig
+          community.general.ini_file:
+            path: "{{ ansible_user_dir }}/.gitconfig"
+            section: "{{ item.section }}"
+            option: "{{ item.option }}"
+            value: "{{ item.value }}"
+          with_items:
+            - section: user
+              option: email
+              value: yabatanien@murichazuke.com
+            - section: user
+              option: name
+              value: YABATANIEN, Murichazuke
+            - section: alias
+              option: co
+              value: checkout
+            - section: alias
+              option: ci
+              value: commit
+            - section: core
+              option: excludesFile
+              value: ~/.gitignore
+            - section: diff
+              option: wordRegex
+              value: '[^[:space:],]+'
 
-        - name: Install AWS SAM CLI
-          command:
-            cmd: /usr/local/src/aws-sam-cli/install --install-dir /opt/aws-sam-cli
-            creates: /usr/local/bin/sam
-
-        - name: Update AWS SAM CLI
-          command:
-            cmd: /usr/local/src/aws-sam-cli/install --install-dir /opt/aws-sam-cli
-          when: X_AWS_SAM_CLI_UPDATE
-      become: yes
-
-    - name: Install act
-      block:
-        - name: Make a directory to extract an archive
-          file:
-            state: directory
-            mode: '0755'
-            path: /opt/act
-
-        - name: Download and extract the archive
-          unarchive:
-            src: https://github.com/nektos/act/releases/download/v0.2.26/act_Linux_x86_64.tar.gz
-            dest: /opt/act
-            owner: root
-            group: root
-            remote_src: yes
-
-        - name: Link the executable
-          file:
-            src: /opt/act/act
-            dest: /usr/local/bin/act
-            state: link
-
-      become: yes
-      tags: test
-
-    - name: Install Golang
-      block:
-        - name: Make a directory to which golang is to be extracted
-          file:
-            state: directory
-            mode: '0755'
-            path: "{{ x_go_dir }}"
-
-        - name: Download and extract Golang
-          unarchive:
-            src: "https://go.dev/dl/go{{ X_GO_VERSION }}.linux-amd64.tar.gz"
-            dest: "{{ x_go_dir }}"
-            remote_src: yes
-            extra_opts: --strip-components=1
-      vars:
-        x_go_dir: "/opt/go-{{ X_GO_VERSION }}"
-      become: yes
-
-    - name: Install Buildg
-      block:
-        - name: Make a directory to which Buildg is to be extracted
-          file:
-            state: directory
-            mode: '0755'
-            path: "{{ x_install_dir }}"
-
-        - name: Download and extract the archive
-          unarchive:
-            src: "https://github.com/ktock/buildg/releases/download/v{{ X_BUILDG_VERSION }}/buildg-full-v{{ X_BUILDG_VERSION }}-linux-amd64.tar.gz"
-            dest: "{{ x_install_dir }}"
-            remote_src: yes
-            extra_opts: --strip-components=1
-        - name: Create a symlink
-          file:
-            state: link
-            src: "{{ x_install_dir }}"
-            dest: "{{ x_path_dir }}"
-      vars:
-        x_install_dir: "/opt/buildg-{{ X_BUILDG_VERSION }}"
-        x_path_dir: "/opt/buildg"
-      tags: install-buildg
-      become: yes
-
-    - name: Install Poetry
-      block:
-        - name: Install Poetry
-          shell:
-            cmd: curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python3 -
-            creates: "{{ ansible_user_dir }}/.poetry"
-
-        - name: Ensure Poetry up-to-date
-          command:
-            argv:
-              - "{{ ansible_user_dir }}/.poetry/bin/poetry"
-              - self
-              - update
-
-    - name: Install Embulk
-      block:
-        - name: Make an installation diretory
-          file:
-            state: directory
-            mode: '0755'
-            path: "/opt/embulk"
-
-        - name: Download and extract Golang
-          get_url:
-            url: "https://dl.embulk.org/embulk-latest.jar"
-            dest: "/opt/embulk/embulk"
-            group: root
-            owner: root
-            mode: '0755'
-
-      tags:
-        - install-embulk
-      become: yes
-
-    - name: Install jp
-      block:
-        - name: Make an installation diretory
-          file:
-            state: directory
-            mode: '0755'
-            path: "/opt/jp"
-
-        - name: Download and extract Golang
-          get_url:
-            url: "https://github.com/jmespath/jp/releases/download/{{ X_JP_VERSION }}/jp-linux-amd64"
-            dest: "/opt/jp/jp"
-            group: root
-            owner: root
-            mode: '0755'
-
-      tags:
-        - install-jp
-      become: yes
-
-    - community.crypto.openssh_keypair:
-        path: "{{ X_OPENSSH_KEYPAIR_PATH }}"
-        type: ed25519
-        comment: "{{ ansible_user_id }}@{{ ansible_hostname }}"
-      when: no
-
-    - blockinfile:
-        path: "{{ ansible_user_dir }}/.ssh/config"
-        mode: "0644"
-        create: yes
-        block: |
-          ServerAliveInterval 10
-
-    - blockinfile:
-        path: "{{ ansible_user_dir }}/.bashrc"
-        create: no
-        block: |
-          . {{ playbook_dir}}/.bashrc
-
-    - blockinfile:
-        path: "{{ ansible_user_dir }}/.vimrc"
-        create: yes
-        marker: '" {mark} ANSIBLE MANAGED BLOCK'
-        block: |
-          source {{ playbook_dir}}/.vimrc
-
-    - git:
-        repo: https://github.com/kristijanhusak/vim-packager
-        dest: "{{ ansible_user_dir }}/.vim/pack/packager/opt/vim-packager"
-
+        - git:
+            repo: https://github.com/kristijanhusak/vim-packager
+            dest: "{{ ansible_user_dir }}/.vim/pack/packager/opt/vim-packager"

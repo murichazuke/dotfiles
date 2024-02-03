@@ -1,0 +1,37 @@
+- set_fact:
+    x_install_archive_dest: >-
+      {{
+        (x_install.archive_dest, x_install.src|basename) | path_join
+      }}
+
+- name: "Make a directory to which {{ x_install.name }} is to be extracted"
+  file:
+    state: directory
+    mode: '0755'
+    path: "{{ x_install_item }}"
+  loop_control:
+    loop_var: x_install_item
+  with_items:
+    - "{{ x_install.archive_dest }}"
+    - "{{ x_install.versioned_dest }}"
+
+- name: "Download the archive"
+  get_url:
+    url: "{{ x_install.src }}"
+    dest: "{{ x_install_archive_dest }}"
+
+- debug: var=x_install_archive_dest
+
+- name: "Extract the downloaded archive"
+  unarchive:
+    remote_src: false
+    src: "{{ x_install_archive_dest }}"
+    dest: "{{ x_install.versioned_dest }}"
+    extra_opts: "{% if x_install.strip_components|default(false) %}--strip-components=1{% else %}[]{% endif %}"
+
+- name: "Create the symlink to point to the version"
+  file:
+    state: link
+    src: "{{ x_install.versioned_dest }}"
+    dest: "{{ x_install.dest }}"
+  when: x_install.versioned_dest != x_install.dest

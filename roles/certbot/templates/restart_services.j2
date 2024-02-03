@@ -1,0 +1,6 @@
+#!/bin/bash -xe
+# {{ ansible_managed }}
+
+{% for item in x_certbot_restart_services %}
+systemctl restart {{ item }}
+{% endfor %}

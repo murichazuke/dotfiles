@@ -1,0 +1,25 @@
+- name: "make a directory to which {{ x_install.name }} is to be installed"
+  file:
+    state: directory
+    mode: '0755'
+    path: "{{ x_install_item|dirname }}"
+  loop_control:
+    loop_var: x_install_item
+  with_items:
+    - "{{ x_install.versioned_dest }}"
+    - "{{ x_install.dest }}"
+
+- name: "download {{ x_install.name }}"
+  get_url:
+    url: "{{ x_install.src }}"
+    dest: "{{ x_install.versioned_dest }}"
+    group: root
+    owner: root
+    mode: '0755'
+
+- name: "create the symlink to point to the version"
+  file:
+    state: link
+    src: "{{ x_install.versioned_dest }}"
+    dest: "{{ x_install.dest }}"
+  when: x_install.versioned_dest != x_install.dest

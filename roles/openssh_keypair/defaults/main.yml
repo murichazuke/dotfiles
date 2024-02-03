@@ -1,0 +1,2 @@
+x_openssh_keypair_type: ed25519
+x_openssh_keypair_comment: "{{ ansible_user_id }}@{{ ansible_hostname }}"

@@ -1,0 +1,79 @@
+---
+- command: whoami
+  changed_when: false
+  register: x_certbot_whoami
+
+- name: Make directories
+  file:
+    state: directory
+    mode: '0755'
+    path: "{{ x_certbot_item }}"
+    recurse: true
+  loop_control:
+    loop_var: x_certbot_item
+  with_items:
+    - "{{ x_certbot_install_dir }}"
+    - "{{ x_certbot_conf_dir }}"
+    - "{{ x_certbot_conf_dir }}/renewal-hooks/post"
+
+- name: Make a virtualenv
+  command:
+    cmd: python3 -m venv "{{ x_certbot_virtualenv_dir }}"
+    creates: "{{ x_certbot_virtualenv_dir }}"
+
+- name: Install certbot and the extra packages
+  pip:
+    name: "{{ [x_certbot_package] + x_certbot_extra_packages }}"
+    virtualenv: "{{ x_certbot_virtualenv_dir }}"
+
+- name: Make directories for the extra configuration files
+  file:
+    state: directory
+    mode: '0755'
+    path: "{{ x_certbot_item }}"
+    recurse: true
+  loop_control:
+    loop_var: x_certbot_item
+  with_items: "{{ x_certbot_extra_confs|map(attribute='dest')|map('dirname')|list }}"
+
+- name: Make the extra configuration file
+  include_tasks: "extra_conf.yml"
+  loop_control:
+    loop_var: x_certbot_item
+  with_items: "{{ x_certbot_extra_confs }}"
+
+- name: Create the post hook to restart services
+  template:
+    src: restart_services.j2
+    dest: "{{ x_certbot_conf_dir }}/renewal-hooks/post/restart_services"
+    mode: "0755"
+  when:
+    - x_certbot_restart_services is defined
+    - x_certbot_restart_services
+
+- name: Check if certificate already exists.
+  stat:
+    path: "{{ x_certbot_conf_dir }}/live/{{ x_certbot_cert_name }}/cert.pem"
+  register: x_certbot_cert
+
+- name: Generate a new certificate
+  command: >-
+    {{ x_certbot_virtualenv_dir }}/bin/certbot
+    certonly
+    --hsts
+    --noninteractive
+    --agree-tos
+    --cert-name={{ x_certbot_cert_name }}
+    --email={{ x_certbot_email }}
+    --post-hook={{ x_certbot_conf_dir }}/renewal-hooks/post/restart_services
+    {{ x_certbot_extra_args }}
+    -d {{ x_certbot_domain }}
+  when: not x_certbot_cert.stat.exists
+
+- name: Add a cron job for certbot renewal
+  cron:
+    name: Certbot automatic renewal
+    job: "{{ x_certbot_install_dir }}/bin/certbot renew"
+    minute: 30
+    hour: 3
+    user: "{{ x_certbot_whoami.stdout }}"

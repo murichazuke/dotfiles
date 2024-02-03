@@ -1,0 +1,25 @@
+---
+- name: Check if the private key exists
+  stat:
+    path: "{{ x_openssh_keypair_path }}.pem"
+  register: x_openssh_keypair_stat
+
+- name: Prompt for the passphrase
+  pause:
+    prompt: "Enter the passphrase for {{ x_openssh_keypair_path }}.pem"
+    echo: false
+  register: x_openssh_keypair_passphrase
+  when: not x_openssh_keypair_stat.stat.exists
+
+- name: Generate the SSH key pair
+  community.crypto.openssh_keypair:
+    path: "{{ x_openssh_keypair_path }}"
+    passphrase: "{{ x_openssh_keypair_passphrase.user_input }}"
+    type: "{{ x_openssh_keypair_type }}"
+    comment: "{{ x_openssh_keypair_comment }}"
+  when: not x_openssh_keypair_stat.stat.exists
+
+- name: "Rename the private key to {{ x_openssh_keypair_path|basename }}.pem"
+  command:
+    cmd: "mv {{ x_openssh_keypair_path }} {{ x_openssh_keypair_path }}.pem"
+    creates: "{{ x_openssh_keypair_path }}.pem"

@@ -1,0 +1,30 @@
+- set_fact:
+    x_install_type: >-
+      {{
+        x_install.type |
+        default(
+          'archive'
+          if x_install.src.endswith(('.tar.gz', '.tgz', '.tar.xz', '.zip'))
+          else 'bin'
+        )
+      }}
+
+- import_tasks: "bin.yml"
+  when: x_install_type == "bin"
+
+- import_tasks: "archive.yml"
+  when: x_install_type == "archive"
+
+- stat:
+    path: "{{ x_install.post_script_creates }}"
+  when: x_install.post_script_creates is defined
+  register: x_install_post_script_creates_stat
+
+- name: Run the post-script
+  shell: "{{ x_install.post_script }}"
+  when: >-
+    (x_install.post_script is defined) and
+    not (
+      (x_install.post_script_creates is defined) and
+      x_install_post_script_creates_stat.stat.exists
+    )

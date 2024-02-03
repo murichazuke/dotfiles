@@ -18,5 +18,4 @@ test -d "${VENV}" || virtualenv "${VENV}"
 test -f "${ANSIBLE}" || "${VENV}/bin/pip" install ansible
 
 "${ANSIBLE_GALAXY}" install -r "${HERE}/requirements.yml"
-exec "${ANSIBLE}" -ilocalhost, -clocal -K "${HERE}/playbook.yml" "${@}"
-
+exec "${ANSIBLE}" -iinventory.ini -K "${HERE}/playbook.yml" "${@}"

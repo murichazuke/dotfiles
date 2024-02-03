@@ -1,0 +1,29 @@
+---
+- name: Check if the extra configuration file exists
+  stat:
+    path: "{{ x_certbot_item.dest }}"
+  register: x_certbot_extra_conf_stat
+
+- name: Make the extra configuration file
+  copy:
+    dest: "{{ x_certbot_item.dest }}"
+    owner: "{{ x_certbot_item.owner }}"
+    group: "{{ x_certbot_item.group }}"
+    mode: "{{ x_certbot_item.mode }}"
+    content: "{{ x_certbot_item.content }}"
+  when: >-
+    not (
+      x_certbot_item.ignore_changes is defined and
+      x_certbot_item.ignore_changes and
+      x_certbot_extra_conf_stat.stat.exists
+    )
+
+- name: Wait for the configuration file filled
+  pause:
+    prompt: Now you have a chance to update the configuration file
+  when: >-
+    not (
+      x_certbot_item.ignore_changes is defined and
+      x_certbot_item.ignore_changes and
+      x_certbot_extra_conf_stat.stat.exists
+    )
