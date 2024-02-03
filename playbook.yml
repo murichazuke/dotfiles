@@ -135,8 +135,7 @@
               - libmariadb-dev
               - man
               - ncdu
-              # - nodejs
-              # - npm
+              - nginx
               - pdftk
               - pkg-config
               - python3-bcrypt
@@ -184,6 +183,8 @@
           tags: install-bins
           include_role:
             name: "install"
+            apply:
+              tags: install-bins
           loop_control:
             loop_var: x_install
           with_items:
@@ -237,6 +238,9 @@
               versioned_dest: "/opt/nodejs-{{ X_NODEJS_VERSION }}"
               strip_components: true
               dest: /opt/bin/nodejs
+              post_script: >-
+                find /opt/nodejs-{{ X_NODEJS_VERSION }} -lname '*.js' -exec readlink -f {} \; |
+                xargs -n1 sed -i 's|^#!/usr/bin/env node$|#!/opt/nodejs-{{ X_NODEJS_VERSION }}/bin/node|1'
 
         - name: Setup certbot
           tags: setup-certbot
@@ -259,6 +263,21 @@
               - nginx
             x_certbot_domain: "*.{{ X_DOMAIN }}"
             x_certbot_email: "{{ X_CERTBOT_EMAIL }}"
+
+        - name: Add a DDNS cronjob
+          tags: add-ddns-cronjob
+          cron:
+            name: DDNS
+            job: >-
+              curl
+              -X PUT
+              -H 'Authorization: Bearer {{ X_GANDI_PAT }}'
+              -H 'Content-Type: application/json'
+              -d "{\"rrset_values\": [\"$(dig -4 +short myip.opendns.com @resolver1.opendns.com)\"], \"rrset_ttl\": 300}"
+              'https://api.gandi.net/v5/livedns/domains/{{ ".".join(X_DOMAIN.rsplit(".", 2)[-2:]) }}/records/{{ X_DOMAIN.rsplit(".", 2)[0] }}/A'
+              | logger -t ddns
+            minute: "*/5"
+            user: root
 
     - name: User configuration
       become: false
